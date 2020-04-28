@@ -33,6 +33,8 @@ var (
 
 type watchSrv struct {
 	peerCon *webrtc.PeerConnection
+	room    RoomInfo
+	name    string
 }
 
 func JsonEncode(str string) map[string]interface{} {
@@ -133,8 +135,7 @@ func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 	peer.On("notification", handleNotification)
 	peer.On("close", handleClose)
 
-	info := RoomInfo{Rid: "alice", Uid: peerId}
-	joinMsg := JoinMsg{RoomInfo: info, Info: UserInfo{Name: "MyName"}}
+	joinMsg := JoinMsg{RoomInfo: t.room, Info: UserInfo{Name: t.name}}
 	// chatMsg := ChatMsg{RoomInfo: info, Info: ChatInfo{Msg: "hello chat", SenderName: "alice"}}
 
 	peer.Request("join", JsonHack(joinMsg),
@@ -147,53 +148,18 @@ func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 		})
 
 	t.publish(peer)
-
-	// peer.Request("broadcast", JsonHack(chatMsg),
-	// 	func(result map[string]interface{}) {
-	// 		logger.Infof("login success: =>  %s", result)
-	// 	},
-	// 	func(code int, err string) {
-	// 		logger.Infof("login reject: %d => %s", code, err)
-	// 	})
-	// peer.Request("offer", JsonEncode(`{"sdp":"empty"}`),
-	// 	func(result map[string]interface{}) {
-	// 		logger.Infof("offer success: =>  %s", result)
-	// 	},
-	// 	func(code int, err string) {
-	// 		logger.Infof("offer reject: %d => %s", code, err)
-	// 	})
-	/*
-		peer.Request("join", JsonEncode(`{"client":"aaa", "type":"sender"}`),
-			func(result map[string]interface{}) {
-				logger.Infof("join success: =>  %s", result)
-			},
-			func(code int, err string) {
-				logger.Infof("join reject: %d => %s", code, err)
-			})
-		peer.Request("publish", JsonEncode(`{"type":"sender", "jsep":{"type":"offer", "sdp":"111111111111111"}}`),
-			func(result map[string]interface{}) {
-				logger.Infof("publish success: =>  %s", result)
-			},
-			func(code int, err string) {
-				logger.Infof("publish reject: %d => %s", code, err)
-			})
-	*/
 }
 
 func (t watchSrv) publish(peer *peer.Peer) {
 	// Get code from rtwatch and gstreamer
-	//
 	if _, err := t.peerCon.AddTrack(audioTrack); err != nil {
 		log.Print(err)
 		panic(err)
-		return
 	}
 	if _, err := t.peerCon.AddTrack(videoTrack); err != nil {
 		log.Print(err)
 		panic(err)
-		return
 	}
-	// } else i
 
 	t.peerCon.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		fmt.Printf("Connection State has changed %s \n", connectionState.String())
@@ -215,32 +181,29 @@ func (t watchSrv) publish(peer *peer.Peer) {
 	info := RoomInfo{Rid: "alice", Uid: peerId}
 	pubMsg := PublishMsg{RoomInfo: info, Jsep: offer, Options: newPublishOptions()}
 
-	peer.Request("publish", JsonHack(pubMsg),
-		func(result map[string]interface{}) {
-			logger.Infof("publish success: =>  %s", result)
-
-			ans := webrtc.SessionDescription{}
-
-			// Hack hack
-			jsep, _ := json.Marshal(result["jsep"])
-			json.Unmarshal(jsep, &ans)
-
-			// Set the remote SessionDescription
-			err = t.peerCon.SetRemoteDescription(ans)
-			if err != nil {
-				panic(err)
-			}
-
-			pipeline = gst.CreatePipeline(containerPath, audioTrack, videoTrack)
-			pipeline.Start()
-		},
+	peer.Request("publish", JsonHack(pubMsg), t.finalizeConnect,
 		func(code int, err string) {
 			logger.Infof("publish reject: %d => %s", code, err)
 		})
+}
 
-	// Creat sdp
-	// Publish sdp
-	// Set response
+func (t watchSrv) finalizeConnect(result map[string]interface{}) {
+	logger.Infof("publish success: =>  %s", result)
+
+	ans := webrtc.SessionDescription{}
+
+	// Hack hack
+	jsep, _ := json.Marshal(result["jsep"])
+	json.Unmarshal(jsep, &ans)
+
+	// Set the remote SessionDescription
+	err := t.peerCon.SetRemoteDescription(ans)
+	if err != nil {
+		panic(err)
+	}
+
+	pipeline = gst.CreatePipeline(containerPath, audioTrack, videoTrack)
+	pipeline.Start()
 }
 
 func main() {
@@ -273,8 +236,12 @@ func main() {
 		log.Fatal(err)
 	}
 
-	watchS := watchSrv{pc}
+	watchS := watchSrv{
+		peerCon: pc,
+		room:    RoomInfo{Rid: "alice", Uid: peerId},
+		name:    "Video User",
+	}
 
-	var wsClient = client.NewClient("ws://localhost:8080/ws?peer="+peerId, watchS.handleWebSocketOpen)
+	var wsClient = client.NewClient("wss://sup.chat.overcloud.org/ws?peer="+peerId, watchS.handleWebSocketOpen)
 	wsClient.ReadMessage()
 }
