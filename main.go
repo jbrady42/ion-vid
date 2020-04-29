@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strings"
 
 	"github.com/cloudwebrtc/go-protoo/client"
 	"github.com/cloudwebrtc/go-protoo/logger"
 	"github.com/cloudwebrtc/go-protoo/peer"
 	"github.com/cloudwebrtc/go-protoo/transport"
 	"github.com/jbrady42/ion-vid/gst"
+	"github.com/mitchellh/mapstructure"
 	"github.com/pion/webrtc/v2"
 )
 
@@ -84,8 +86,8 @@ type JoinMsg struct {
 }
 
 type ChatMsg struct {
-	RoomInfo
-	Info ChatInfo `json:"info"`
+	RoomInfo `mapstructure:",squash"`
+	Info     ChatInfo `json:"info"`
 }
 
 type PublishMsg struct {
@@ -96,7 +98,7 @@ type PublishMsg struct {
 
 func newPublishOptions() PublishOptions {
 	return PublishOptions{
-		Codec:      "vp8",
+		Codec:      "h264",
 		Resolution: "hd",
 		Bandwidth:  1024,
 		Audio:      true,
@@ -123,16 +125,16 @@ func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 		}
 	}
 
-	handleNotification := func(notification map[string]interface{}) {
-		logger.Infof("handleNotification => %s", notification["method"])
-	}
+	// handleNotification := func(notification map[string]interface{}) {
+	// 	logger.Infof("handleNotification => %s", notification["method"])
+	// }
 
 	handleClose := func(code int, err string) {
 		logger.Infof("handleClose => peer (%s) [%d] %s", peer.ID(), code, err)
 	}
 
 	peer.On("request", handleRequest)
-	peer.On("notification", handleNotification)
+	peer.On("notification", t.handleMessage)
 	peer.On("close", handleClose)
 
 	joinMsg := JoinMsg{RoomInfo: t.room, Info: UserInfo{Name: t.name}}
@@ -148,6 +150,42 @@ func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 		})
 
 	t.publish(peer)
+}
+
+func (t watchSrv) handleMessage(notification map[string]interface{}) {
+	logger.Infof("handleNotification => %s", notification["method"])
+	method := notification["method"].(string)
+	if method != "broadcast" {
+		return
+	}
+	var msg ChatMsg
+	err := mapstructure.Decode(notification["data"], &msg)
+	if err != nil {
+		panic(err)
+	}
+	cmdStr := msg.Info.Msg
+	if !strings.HasPrefix(cmdStr, "@") {
+		return
+	}
+	t.handleCommand(strings.Trim(cmdStr, " @\n"))
+}
+
+func contains(p []string, search string) bool {
+	for _, a := range p {
+		if a == search {
+			return true
+		}
+	}
+	return false
+}
+
+func (t watchSrv) handleCommand(cmd string) {
+	if contains([]string{"play", "start"}, cmd) {
+		log.Println("Got COMMAND", cmd)
+		pipeline.Play()
+	} else if contains([]string{"pause", "stop"}, cmd) {
+		pipeline.Pause()
+	}
 }
 
 func (t watchSrv) publish(peer *peer.Peer) {
@@ -201,9 +239,6 @@ func (t watchSrv) finalizeConnect(result map[string]interface{}) {
 	if err != nil {
 		panic(err)
 	}
-
-	pipeline = gst.CreatePipeline(containerPath, audioTrack, videoTrack)
-	pipeline.Start()
 }
 
 func main() {
@@ -226,7 +261,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	videoTrack, err = pc.NewTrack(webrtc.DefaultPayloadTypeVP8, rand.Uint32(), "synced-video", "synced-video")
+	videoTrack, err = pc.NewTrack(webrtc.DefaultPayloadTypeH264, rand.Uint32(), "synced-video", "synced-video")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -241,6 +276,9 @@ func main() {
 		room:    RoomInfo{Rid: "alice", Uid: peerId},
 		name:    "Video User",
 	}
+
+	pipeline = gst.CreatePipeline(containerPath, audioTrack, videoTrack)
+	pipeline.Start()
 
 	var wsClient = client.NewClient("wss://sup.chat.overcloud.org/ws?peer="+peerId, watchS.handleWebSocketOpen)
 	wsClient.ReadMessage()
