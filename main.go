@@ -18,79 +18,13 @@ import (
 	"github.com/pion/webrtc/v2"
 )
 
-var (
-	peerConnectionConfig = webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
-			},
-		},
-	}
-
-	audioTrack = &webrtc.Track{}
-	videoTrack = &webrtc.Track{}
-	pipeline   = &gst.Pipeline{}
-)
-
 type watchSrv struct {
-	peerCon *webrtc.PeerConnection
-	room    RoomInfo
-	name    string
-}
-
-type AcceptFunc func(data map[string]interface{})
-type RejectFunc func(errorCode int, errorReason string)
-
-var peerId = "go-client-id-xxxx"
-
-type RoomInfo struct {
-	Rid string `mapstructure:"rid"`
-	Uid string `mapstructure:"uid"`
-}
-
-type ChatInfo struct {
-	Msg        string `mapstructure:"msg"`
-	SenderName string `mapstructure:"senderName"`
-}
-
-type UserInfo struct {
-	Name string `mapstructure:"name"`
-}
-
-type PublishOptions struct {
-	Codec      string `json:"codec"`
-	Resolution string `json:"resolution"`
-	Bandwidth  int    `json:"bandwidth"`
-	Audio      bool   `json:"audio"`
-	Video      bool   `json:"video"`
-	Screen     bool   `json:"screen"`
-}
-
-type JoinMsg struct {
-	RoomInfo `mapstructure:",squash"`
-	Info     UserInfo `mapstructure:"info"`
-}
-
-type ChatMsg struct {
-	RoomInfo `mapstructure:",squash"`
-	Info     ChatInfo `mapstructure:"info"`
-}
-
-type PublishMsg struct {
-	RoomInfo `json:",squash"`
-	Jsep     webrtc.SessionDescription `json:"jsep"`
-	Options  PublishOptions            `json:"options"`
-}
-
-func newPublishOptions() PublishOptions {
-	return PublishOptions{
-		Codec:      "h264",
-		Resolution: "hd",
-		Bandwidth:  1024,
-		Audio:      true,
-		Video:      true,
-		Screen:     false,
-	}
+	peerCon    *webrtc.PeerConnection
+	room       RoomInfo
+	name       string
+	audioTrack *webrtc.Track
+	videoTrack *webrtc.Track
+	pipeline   *gst.Pipeline
 }
 
 func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
@@ -166,9 +100,9 @@ func contains(p []string, search string) bool {
 func (t watchSrv) handleCommand(cmd string) {
 	log.Println("Got command", cmd)
 	if contains([]string{"play", "start"}, cmd) {
-		pipeline.Play()
+		t.pipeline.Play()
 	} else if contains([]string{"pause", "stop"}, cmd) {
-		pipeline.Pause()
+		t.pipeline.Pause()
 	} else if contains([]string{"seek"}, cmd) {
 		list := strings.Split(cmd, " ")
 		log.Println(list)
@@ -180,17 +114,17 @@ func (t watchSrv) handleCommand(cmd string) {
 			log.Println("Error parsing seek string")
 			return
 		}
-		pipeline.SeekToTime(time)
+		t.pipeline.SeekToTime(time)
 	}
 }
 
 func (t watchSrv) publish(peer *peer.Peer) {
 	// Get code from rtwatch and gstreamer
-	if _, err := t.peerCon.AddTrack(audioTrack); err != nil {
+	if _, err := t.peerCon.AddTrack(t.audioTrack); err != nil {
 		log.Print(err)
 		panic(err)
 	}
-	if _, err := t.peerCon.AddTrack(videoTrack); err != nil {
+	if _, err := t.peerCon.AddTrack(t.videoTrack); err != nil {
 		log.Print(err)
 		panic(err)
 	}
@@ -268,24 +202,27 @@ func main() {
 		log.Fatal(err)
 	}
 
-	videoTrack, err = pc.NewTrack(webrtc.DefaultPayloadTypeH264, rand.Uint32(), "synced-video", "synced-video")
+	videoTrack, err := pc.NewTrack(webrtc.DefaultPayloadTypeH264, rand.Uint32(), "synced-video", "synced-video")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	audioTrack, err = pc.NewTrack(webrtc.DefaultPayloadTypeOpus, rand.Uint32(), "synced-audio", "synced-video")
+	audioTrack, err := pc.NewTrack(webrtc.DefaultPayloadTypeOpus, rand.Uint32(), "synced-audio", "synced-video")
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	pipeline := gst.CreatePipeline(containerPath, audioTrack, videoTrack)
+	pipeline.Start()
 
 	watchS := watchSrv{
-		peerCon: pc,
-		room:    RoomInfo{Rid: "alice", Uid: peerId},
-		name:    "Video User",
+		peerCon:    pc,
+		room:       RoomInfo{Rid: "alice", Uid: peerId},
+		name:       "Video User",
+		videoTrack: videoTrack,
+		audioTrack: audioTrack,
+		pipeline:   pipeline,
 	}
-
-	pipeline = gst.CreatePipeline(containerPath, audioTrack, videoTrack)
-	pipeline.Start()
 
 	var wsClient = client.NewClient(ionPath+"?peer="+peerId, watchS.handleWebSocketOpen)
 	wsClient.ReadMessage()
