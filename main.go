@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strconv"
 	"strings"
 
 	"github.com/cloudwebrtc/go-protoo/client"
@@ -172,7 +173,7 @@ func (t watchSrv) handleMessage(notification map[string]interface{}) {
 
 func contains(p []string, search string) bool {
 	for _, a := range p {
-		if a == search {
+		if strings.Contains(search, a) {
 			return true
 		}
 	}
@@ -180,11 +181,23 @@ func contains(p []string, search string) bool {
 }
 
 func (t watchSrv) handleCommand(cmd string) {
+	log.Println("Got COMMAND", cmd)
 	if contains([]string{"play", "start"}, cmd) {
-		log.Println("Got COMMAND", cmd)
 		pipeline.Play()
 	} else if contains([]string{"pause", "stop"}, cmd) {
 		pipeline.Pause()
+	} else if contains([]string{"seek"}, cmd) {
+		list := strings.Split(cmd, " ")
+		log.Println(list)
+		if len(list) < 2 {
+			return
+		}
+		time, err := strconv.Atoi(list[1])
+		if err != nil {
+			log.Println("Error parsing seek string")
+			return
+		}
+		pipeline.SeekToTime(int64(time))
 	}
 }
 
