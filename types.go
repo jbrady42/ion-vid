@@ -5,8 +5,6 @@ import "github.com/pion/webrtc/v2"
 type AcceptFunc func(data map[string]interface{})
 type RejectFunc func(errorCode int, errorReason string)
 
-var peerId = "go-client-id-xxxx"
-
 type RoomInfo struct {
 	Rid string `mapstructure:"rid"`
 	Uid string `mapstructure:"uid"`

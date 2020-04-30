@@ -13,6 +13,7 @@ import (
 	"github.com/cloudwebrtc/go-protoo/logger"
 	"github.com/cloudwebrtc/go-protoo/peer"
 	"github.com/cloudwebrtc/go-protoo/transport"
+	"github.com/frankenbeanies/uuid4"
 	"github.com/jbrady42/ion-vid/gst"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pion/webrtc/v2"
@@ -30,7 +31,7 @@ type watchSrv struct {
 func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 	logger.Infof("handleWebSocketOpen")
 
-	peer := peer.NewPeer(peerId, transport)
+	peer := peer.NewPeer(t.room.Uid, transport)
 	peer.On("close", func(code int, err string) {
 		logger.Infof("peer close [%d] %s", code, err)
 	})
@@ -152,10 +153,7 @@ func (t watchSrv) publish(peer *peer.Peer) {
 		TagName: "json",
 	}
 	decoder, _ := mapstructure.NewDecoder(&dc)
-
-	info := RoomInfo{Rid: "alice", Uid: peerId}
-	pubMsg := PublishMsg{RoomInfo: info, Jsep: offer, Options: newPublishOptions()}
-
+	pubMsg := PublishMsg{RoomInfo: t.room, Jsep: offer, Options: newPublishOptions()}
 	decoder.Decode(pubMsg)
 
 	peer.Request("publish", pubReq, t.finalizeConnect,
@@ -182,9 +180,11 @@ func (t watchSrv) finalizeConnect(result map[string]interface{}) {
 func main() {
 	var containerPath string
 	var ionPath string
+	var roomName string
 
 	flag.StringVar(&containerPath, "container-path", "", "path to the media file you want to playback")
 	flag.StringVar(&ionPath, "ion-url", "ws://localhost:8443/ws", "websocket url for ion biz system")
+	flag.StringVar(&roomName, "room", "video-demo", "Room name for Ion")
 	flag.Parse()
 
 	if containerPath == "" {
@@ -215,9 +215,12 @@ func main() {
 	pipeline := gst.CreatePipeline(containerPath, audioTrack, videoTrack)
 	pipeline.Start()
 
+	uuidStr := uuid4.New().String()
+	peerId := "video-client-" + uuidStr
+
 	watchS := watchSrv{
 		peerCon:    pc,
-		room:       RoomInfo{Rid: "alice", Uid: peerId},
+		room:       RoomInfo{Rid: roomName, Uid: peerId},
 		name:       "Video User",
 		videoTrack: videoTrack,
 		audioTrack: audioTrack,
