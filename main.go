@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudwebrtc/go-protoo/client"
 	"github.com/cloudwebrtc/go-protoo/logger"
@@ -17,6 +18,7 @@ import (
 	"github.com/jbrady42/ion-vid/gst"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pion/webrtc/v2"
+	"github.com/pion/webrtc/v2/pkg/media"
 )
 
 type watchSrv struct {
@@ -26,9 +28,10 @@ type watchSrv struct {
 	audioTrack *webrtc.Track
 	videoTrack *webrtc.Track
 	pipeline   *gst.Pipeline
+	paused     bool
 }
 
-func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
+func (t *watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 	logger.Infof("handleWebSocketOpen")
 
 	peer := peer.NewPeer(t.room.Uid, transport)
@@ -70,7 +73,7 @@ func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 		})
 }
 
-func (t watchSrv) handleMessage(notification map[string]interface{}) {
+func (t *watchSrv) handleMessage(notification map[string]interface{}) {
 	logger.Infof("handleNotification => %s", notification["method"])
 	method := notification["method"].(string)
 	if method != "broadcast" {
@@ -97,12 +100,34 @@ func contains(p []string, search string) bool {
 	return false
 }
 
-func (t watchSrv) handleCommand(cmd string) {
+func (t *watchSrv) setPaused(paused bool) {
+	if t.paused == paused {
+		return
+	}
+	t.paused = paused
+	if t.paused {
+		go t.trackPausedLoop(t.audioTrack)
+	}
+}
+
+func (t *watchSrv) trackPausedLoop(track *webrtc.Track) {
+	log.Println("Send pause frame")
+	for t.paused {
+		// Produce empty sample
+		track.WriteSample(media.Sample{Data: make([]byte, 8), Samples: 1})
+		time.Sleep(15 * time.Millisecond)
+	}
+	log.Println("Exit pause frame")
+}
+
+func (t *watchSrv) handleCommand(cmd string) {
 	log.Println("Got command", cmd)
 	if contains([]string{"play", "start"}, cmd) {
 		t.pipeline.Play()
+		t.setPaused(false)
 	} else if contains([]string{"pause", "stop"}, cmd) {
 		t.pipeline.Pause()
+		t.setPaused(true)
 	} else if contains([]string{"seek"}, cmd) {
 		list := strings.Split(cmd, " ")
 		log.Println(list)
@@ -118,7 +143,7 @@ func (t watchSrv) handleCommand(cmd string) {
 	}
 }
 
-func (t watchSrv) publish(peer *peer.Peer) {
+func (t *watchSrv) publish(peer *peer.Peer) {
 	// Get code from rtwatch and gstreamer
 	if _, err := t.peerCon.AddTrack(t.audioTrack); err != nil {
 		log.Print(err)
@@ -161,7 +186,7 @@ func (t watchSrv) publish(peer *peer.Peer) {
 		})
 }
 
-func (t watchSrv) finalizeConnect(result map[string]interface{}) {
+func (t *watchSrv) finalizeConnect(result map[string]interface{}) {
 	logger.Infof("publish success: =>  %s", result)
 	ans := webrtc.SessionDescription{}
 
