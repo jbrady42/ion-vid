@@ -63,12 +63,11 @@ func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 		func(result map[string]interface{}) {
 			logger.Infof("login success: =>  %s", result)
 			// Add media stream
+			t.publish(peer)
 		},
 		func(code int, err string) {
 			logger.Infof("login reject: %d => %s", code, err)
 		})
-
-	t.publish(peer)
 }
 
 func (t watchSrv) handleMessage(notification map[string]interface{}) {
