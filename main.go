@@ -27,8 +27,6 @@ var (
 		},
 	}
 
-	containerPath = ""
-
 	audioTrack = &webrtc.Track{}
 	videoTrack = &webrtc.Track{}
 	pipeline   = &gst.Pipeline{}
@@ -40,36 +38,23 @@ type watchSrv struct {
 	name    string
 }
 
-func JsonEncode(str string) map[string]interface{} {
-	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(str), &data); err != nil {
-		panic(err)
-	}
-	return data
-}
-
-func JsonHack(a interface{}) map[string]interface{} {
-	b, _ := json.Marshal(a)
-	return JsonEncode(string(b))
-}
-
 type AcceptFunc func(data map[string]interface{})
 type RejectFunc func(errorCode int, errorReason string)
 
 var peerId = "go-client-id-xxxx"
 
 type RoomInfo struct {
-	Rid string `json:"rid"`
-	Uid string `json:"uid"`
+	Rid string `mapstructure:"rid"`
+	Uid string `mapstructure:"uid"`
 }
 
 type ChatInfo struct {
-	Msg        string `json:"msg"`
-	SenderName string `json:"senderName"`
+	Msg        string `mapstructure:"msg"`
+	SenderName string `mapstructure:"senderName"`
 }
 
 type UserInfo struct {
-	Name string `json:"name"`
+	Name string `mapstructure:"name"`
 }
 
 type PublishOptions struct {
@@ -82,19 +67,19 @@ type PublishOptions struct {
 }
 
 type JoinMsg struct {
-	RoomInfo
-	Info UserInfo `json:"info"`
+	RoomInfo `mapstructure:",squash"`
+	Info     UserInfo `mapstructure:"info"`
 }
 
 type ChatMsg struct {
 	RoomInfo `mapstructure:",squash"`
-	Info     ChatInfo `json:"info"`
+	Info     ChatInfo `mapstructure:"info"`
 }
 
 type PublishMsg struct {
-	RoomInfo
-	Jsep    webrtc.SessionDescription `json:"jsep"`
-	Options PublishOptions            `json:"options"`
+	RoomInfo `json:",squash"`
+	Jsep     webrtc.SessionDescription `json:"jsep"`
+	Options  PublishOptions            `json:"options"`
 }
 
 func newPublishOptions() PublishOptions {
@@ -122,13 +107,9 @@ func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 		if method == "kick" {
 			reject(486, "Busy Here")
 		} else {
-			accept(JsonEncode(`{}`))
+			accept(make(map[string]interface{}))
 		}
 	}
-
-	// handleNotification := func(notification map[string]interface{}) {
-	// 	logger.Infof("handleNotification => %s", notification["method"])
-	// }
 
 	handleClose := func(code int, err string) {
 		logger.Infof("handleClose => peer (%s) [%d] %s", peer.ID(), code, err)
@@ -139,9 +120,11 @@ func (t watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 	peer.On("close", handleClose)
 
 	joinMsg := JoinMsg{RoomInfo: t.room, Info: UserInfo{Name: t.name}}
-	// chatMsg := ChatMsg{RoomInfo: info, Info: ChatInfo{Msg: "hello chat", SenderName: "alice"}}
 
-	peer.Request("join", JsonHack(joinMsg),
+	var joinReq map[string]interface{}
+	mapstructure.Decode(joinMsg, &joinReq)
+
+	peer.Request("join", joinReq,
 		func(result map[string]interface{}) {
 			logger.Infof("login success: =>  %s", result)
 			// Add media stream
@@ -181,7 +164,7 @@ func contains(p []string, search string) bool {
 }
 
 func (t watchSrv) handleCommand(cmd string) {
-	log.Println("Got COMMAND", cmd)
+	log.Println("Got command", cmd)
 	if contains([]string{"play", "start"}, cmd) {
 		pipeline.Play()
 	} else if contains([]string{"pause", "stop"}, cmd) {
@@ -192,12 +175,12 @@ func (t watchSrv) handleCommand(cmd string) {
 		if len(list) < 2 {
 			return
 		}
-		time, err := strconv.Atoi(list[1])
+		time, err := strconv.ParseInt(list[1], 10, 64)
 		if err != nil {
 			log.Println("Error parsing seek string")
 			return
 		}
-		pipeline.SeekToTime(int64(time))
+		pipeline.SeekToTime(time)
 	}
 }
 
@@ -229,10 +212,19 @@ func (t watchSrv) publish(peer *peer.Peer) {
 	}
 	log.Println(offer)
 
+	var pubReq map[string]interface{}
+	dc := mapstructure.DecoderConfig{
+		Result:  &pubReq,
+		TagName: "json",
+	}
+	decoder, _ := mapstructure.NewDecoder(&dc)
+
 	info := RoomInfo{Rid: "alice", Uid: peerId}
 	pubMsg := PublishMsg{RoomInfo: info, Jsep: offer, Options: newPublishOptions()}
 
-	peer.Request("publish", JsonHack(pubMsg), t.finalizeConnect,
+	decoder.Decode(pubMsg)
+
+	peer.Request("publish", pubReq, t.finalizeConnect,
 		func(code int, err string) {
 			logger.Infof("publish reject: %d => %s", code, err)
 		})
@@ -240,7 +232,6 @@ func (t watchSrv) publish(peer *peer.Peer) {
 
 func (t watchSrv) finalizeConnect(result map[string]interface{}) {
 	logger.Infof("publish success: =>  %s", result)
-
 	ans := webrtc.SessionDescription{}
 
 	// Hack hack
@@ -255,8 +246,11 @@ func (t watchSrv) finalizeConnect(result map[string]interface{}) {
 }
 
 func main() {
+	var containerPath string
+	var ionPath string
 
 	flag.StringVar(&containerPath, "container-path", "", "path to the media file you want to playback")
+	flag.StringVar(&ionPath, "ion-url", "ws://localhost:8443/ws", "websocket url for ion biz system")
 	flag.Parse()
 
 	if containerPath == "" {
@@ -293,6 +287,6 @@ func main() {
 	pipeline = gst.CreatePipeline(containerPath, audioTrack, videoTrack)
 	pipeline.Start()
 
-	var wsClient = client.NewClient("wss://sup.chat.overcloud.org/ws?peer="+peerId, watchS.handleWebSocketOpen)
+	var wsClient = client.NewClient(ionPath+"?peer="+peerId, watchS.handleWebSocketOpen)
 	wsClient.ReadMessage()
 }
