@@ -19,10 +19,3 @@ The video can be controlled using the ion chat window via text commands.
 @pause
 @seek <time in seconds>
 ```
-
-### Status
-
-Play and seek working.
-
-#### Pause In progress
-If the video is paused for more than 6s ion SFU will drop connection.
