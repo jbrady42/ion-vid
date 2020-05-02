@@ -38,8 +38,8 @@ func (t *watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) 
 		logger.Infof("peer close [%d] %s", code, err)
 	})
 
-	handleRequest := func(request map[string]interface{}, accept peer.AcceptFunc, reject peer.RejectFunc) {
-		method := request["method"]
+	handleRequest := func(request peer.Request, accept peer.AcceptFunc, reject peer.RejectFunc) {
+		method := request.Method
 		logger.Infof("handleRequest =>  (%s) ", method)
 		if method == "kick" {
 			reject(486, "Busy Here")
