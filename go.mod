@@ -9,3 +9,5 @@ require (
 	github.com/pion/rtwatch v0.0.0-20200302042801-1e20513065ea
 	github.com/pion/webrtc/v2 v2.2.6
 )
+
+replace github.com/cloudwebrtc/go-protoo => github.com/jbrady42/go-protoo v0.0.2
