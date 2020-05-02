@@ -2,21 +2,18 @@ package main
 
 import "github.com/pion/webrtc/v2"
 
-type AcceptFunc func(data map[string]interface{})
-type RejectFunc func(errorCode int, errorReason string)
-
 type RoomInfo struct {
-	Rid string `mapstructure:"rid"`
-	Uid string `mapstructure:"uid"`
+	Rid string `json:"rid"`
+	Uid string `json:"uid"`
 }
 
 type ChatInfo struct {
-	Msg        string `mapstructure:"msg"`
-	SenderName string `mapstructure:"senderName"`
+	Msg        string `json:"msg"`
+	SenderName string `json:"senderName"`
 }
 
 type UserInfo struct {
-	Name string `mapstructure:"name"`
+	Name string `json:"name"`
 }
 
 type PublishOptions struct {
@@ -29,19 +26,19 @@ type PublishOptions struct {
 }
 
 type JoinMsg struct {
-	RoomInfo `mapstructure:",squash"`
-	Info     UserInfo `mapstructure:"info"`
+	RoomInfo
+	Info UserInfo `json:"info"`
 }
 
 type ChatMsg struct {
-	RoomInfo `mapstructure:",squash"`
-	Info     ChatInfo `mapstructure:"info"`
+	RoomInfo
+	Info ChatInfo `json:"info"`
 }
 
 type PublishMsg struct {
-	RoomInfo `json:",squash"`
-	Jsep     webrtc.SessionDescription `json:"jsep"`
-	Options  PublishOptions            `json:"options"`
+	RoomInfo
+	Jsep    webrtc.SessionDescription `json:"jsep"`
+	Options PublishOptions            `json:"options"`
 }
 
 func newPublishOptions() PublishOptions {

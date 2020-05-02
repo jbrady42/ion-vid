@@ -15,7 +15,6 @@ import (
 	"github.com/cloudwebrtc/go-protoo/peer"
 	"github.com/cloudwebrtc/go-protoo/transport"
 	"github.com/frankenbeanies/uuid4"
-	"github.com/mitchellh/mapstructure"
 	"github.com/pion/rtwatch/gst"
 	"github.com/pion/webrtc/v2"
 	"github.com/pion/webrtc/v2/pkg/media"
@@ -34,53 +33,50 @@ type watchSrv struct {
 func (t *watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
 	logger.Infof("handleWebSocketOpen")
 
-	peer := peer.NewPeer(t.room.Uid, transport)
-	peer.On("close", func(code int, err string) {
+	pr := peer.NewPeer(t.room.Uid, transport)
+	pr.On("close", func(code int, err string) {
 		logger.Infof("peer close [%d] %s", code, err)
 	})
 
-	handleRequest := func(request map[string]interface{}, accept AcceptFunc, reject RejectFunc) {
+	handleRequest := func(request map[string]interface{}, accept peer.AcceptFunc, reject peer.RejectFunc) {
 		method := request["method"]
 		logger.Infof("handleRequest =>  (%s) ", method)
 		if method == "kick" {
 			reject(486, "Busy Here")
 		} else {
-			accept(make(map[string]interface{}))
+			accept(nil)
 		}
 	}
 
 	handleClose := func(code int, err string) {
-		logger.Infof("handleClose => peer (%s) [%d] %s", peer.ID(), code, err)
+		logger.Infof("handleClose => peer (%s) [%d] %s", pr.ID(), code, err)
 	}
 
-	peer.On("request", handleRequest)
-	peer.On("notification", t.handleMessage)
-	peer.On("close", handleClose)
+	pr.On("request", handleRequest)
+	pr.On("notification", t.handleMessage)
+	pr.On("close", handleClose)
 
 	joinMsg := JoinMsg{RoomInfo: t.room, Info: UserInfo{Name: t.name}}
 
-	var joinReq map[string]interface{}
-	mapstructure.Decode(joinMsg, &joinReq)
-
-	peer.Request("join", joinReq,
-		func(result map[string]interface{}) {
+	pr.Request("join", joinMsg,
+		func(result json.RawMessage) {
 			logger.Infof("login success: =>  %s", result)
 			// Add media stream
-			t.publish(peer)
+			t.publish(pr)
 		},
 		func(code int, err string) {
 			logger.Infof("login reject: %d => %s", code, err)
 		})
 }
 
-func (t *watchSrv) handleMessage(notification map[string]interface{}) {
-	logger.Infof("handleNotification => %s", notification["method"])
-	method := notification["method"].(string)
+func (t *watchSrv) handleMessage(notification peer.Notification) {
+	logger.Infof("handleNotification => %s", notification.Method)
+	method := notification.Method
 	if method != "broadcast" {
 		return
 	}
 	var msg ChatMsg
-	err := mapstructure.Decode(notification["data"], &msg)
+	err := json.Unmarshal(notification.Data, &msg)
 	if err != nil {
 		panic(err)
 	}
@@ -115,7 +111,7 @@ func (t *watchSrv) trackPausedLoop(track *webrtc.Track) {
 	for t.paused {
 		// Produce empty sample
 		track.WriteSample(media.Sample{Data: make([]byte, 8), Samples: 1})
-		time.Sleep(15 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 	log.Println("Exit pause frame")
 }
@@ -171,31 +167,30 @@ func (t *watchSrv) publish(peer *peer.Peer) {
 	}
 	log.Println(offer)
 
-	var pubReq map[string]interface{}
-	dc := mapstructure.DecoderConfig{
-		Result:  &pubReq,
-		TagName: "json",
-	}
-	decoder, _ := mapstructure.NewDecoder(&dc)
 	pubMsg := PublishMsg{RoomInfo: t.room, Jsep: offer, Options: newPublishOptions()}
-	decoder.Decode(pubMsg)
 
-	peer.Request("publish", pubReq, t.finalizeConnect,
+	peer.Request("publish", pubMsg, t.finalizeConnect,
 		func(code int, err string) {
 			logger.Infof("publish reject: %d => %s", code, err)
 		})
 }
 
-func (t *watchSrv) finalizeConnect(result map[string]interface{}) {
-	logger.Infof("publish success: =>  %s", result)
-	ans := webrtc.SessionDescription{}
+type connectMsg struct {
+	Ans webrtc.SessionDescription `json:"jsep"`
+}
 
-	// Hack hack
-	jsep, _ := json.Marshal(result["jsep"])
-	json.Unmarshal(jsep, &ans)
+func (t *watchSrv) finalizeConnect(result json.RawMessage) {
+	logger.Infof("publish success: =>  %s", result)
+
+	var msg connectMsg
+	err := json.Unmarshal(result, &msg)
+	if err != nil {
+		log.Println(err)
+		return
+	}
 
 	// Set the remote SessionDescription
-	err := t.peerCon.SetRemoteDescription(ans)
+	err = t.peerCon.SetRemoteDescription(msg.Ans)
 	if err != nil {
 		panic(err)
 	}
