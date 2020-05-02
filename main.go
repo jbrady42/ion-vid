@@ -15,8 +15,8 @@ import (
 	"github.com/cloudwebrtc/go-protoo/peer"
 	"github.com/cloudwebrtc/go-protoo/transport"
 	"github.com/frankenbeanies/uuid4"
-	"github.com/jbrady42/ion-vid/gst"
 	"github.com/mitchellh/mapstructure"
+	"github.com/pion/rtwatch/gst"
 	"github.com/pion/webrtc/v2"
 	"github.com/pion/webrtc/v2/pkg/media"
 )
