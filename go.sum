@@ -3,6 +3,8 @@ github.com/chuckpreslar/emission v0.0.0-20170206194824-a7ddd980baf9 h1:xz6Nv3zcw
 github.com/chuckpreslar/emission v0.0.0-20170206194824-a7ddd980baf9/go.mod h1:2wSM9zJkl1UQEFZgSd68NfCgRz1VL1jzy/RjCg+ULrs=
 github.com/cloudwebrtc/go-protoo v0.0.0-20200324091126-61fe57ffd18f h1:I9FnOOvegGTvlT2FUuh8skmkCfusD5jfGVI623l+Evo=
 github.com/cloudwebrtc/go-protoo v0.0.0-20200324091126-61fe57ffd18f/go.mod h1:Q0DiItmsD5iCBdeID9Xu03ok8bemc78XJ+0rYATQbuQ=
+github.com/cloudwebrtc/go-protoo v0.0.0-20200503150352-84211f461572 h1:aNoSRlLqA7kmItRZrmz6DMSsBFjwSoJAXidWEfnyB6Y=
+github.com/cloudwebrtc/go-protoo v0.0.0-20200503150352-84211f461572/go.mod h1:Q0DiItmsD5iCBdeID9Xu03ok8bemc78XJ+0rYATQbuQ=
 github.com/coreos/go-systemd v0.0.0-20190321100706-95778dfbb74e/go.mod h1:F5haX7vjVVG0kc13fIWeqUViNPyEJxv/OmvnBo0Yme4=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
