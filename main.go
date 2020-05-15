@@ -72,9 +72,11 @@ func (t *watchSrv) handleCommand(cmd string) {
 	if contains([]string{"play", "start"}, cmd) {
 		t.player.Pause(false)
 		t.setPaused(false)
+
 	} else if contains([]string{"pause", "stop"}, cmd) {
 		t.player.Pause(true)
 		t.setPaused(true)
+
 	} else if contains([]string{"seek"}, cmd) {
 		list := strings.Split(cmd, " ")
 		log.Println(list)
@@ -117,7 +119,6 @@ func (t *watchSrv) runClient() {
 	// Close client
 	t.client.Leave()
 	t.client.Close()
-
 }
 
 func (t *watchSrv) setupClient(room, path, clientName, vidFile, fileType string) {
@@ -133,29 +134,12 @@ func (t *watchSrv) setupClient(room, path, clientName, vidFile, fileType string)
 	} else if fileType == "ivf" {
 		t.player = producer.NewIVFProducer(vidFile, 0)
 	} else if fileType == "gst" {
-
+		t.player = producer.NewGSTProducer(vidFile)
 	}
 	t.client.VideoTrack = t.player.VideoTrack()
 	t.client.AudioTrack = t.player.AudioTrack()
 
 	t.player.Start()
-}
-
-func validateFile(name string) (string, bool) {
-	list := strings.Split(name, ".")
-	if len(list) < 2 {
-		return "", false
-	}
-	ext := strings.ToLower(list[len(list)-1])
-	var valid bool
-	// Validate is ivf|webm
-	for _, a := range []string{"ivf", "webm"} {
-		if a == ext {
-			valid = true
-		}
-	}
-
-	return ext, valid
 }
 
 func main() {
@@ -173,16 +157,13 @@ func main() {
 		panic("-container-path must be specified")
 	}
 
-	watchS := watchSrv{
-		name: "Video User",
-	}
+	watchS := watchSrv{name: "Video User"}
 
-	ext, ok := producer.ValidateVPFile(containerPath)
-	log.Println(ext)
+	containerType, ok := producer.ValidateVPFile(containerPath)
 	if !ok {
-		panic("Only IVF and WEBM containers are supported.")
+		containerType = "gst"
+		log.Println("Direct playback not support. Using gstreamer")
 	}
-	containerType := ext
 
 	// Setup shutdown
 	sigs := make(chan os.Signal, 1)
