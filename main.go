@@ -88,7 +88,7 @@ func (t *watchSrv) handleCommand(cmd string) {
 			log.Println("Error parsing seek string")
 			return
 		}
-		t.player.SeekP(time)
+		t.player.SeekP(int(time))
 	}
 }
 
@@ -154,7 +154,7 @@ func main() {
 	flag.Parse()
 
 	if containerPath == "" {
-		panic("-container-path must be specified")
+		panic("-file must be specified")
 	}
 
 	watchS := watchSrv{name: "Video User"}
