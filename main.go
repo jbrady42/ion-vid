@@ -13,6 +13,9 @@ import (
 
 	"github.com/pion/ion-load-tool/ion"
 	"github.com/pion/ion-load-tool/producer"
+	"github.com/pion/ion-load-tool/producer/gst"
+	"github.com/pion/ion-load-tool/producer/ivf"
+	"github.com/pion/ion-load-tool/producer/webm"
 	"github.com/pion/webrtc/v2"
 	"github.com/pion/webrtc/v2/pkg/media"
 )
@@ -127,14 +130,14 @@ func (t *watchSrv) setupClient(room, path, clientName, vidFile, fileType string)
 
 	// Configure sender tracks
 	if fileType == "webm" {
-		t.player = producer.NewMFileProducer(vidFile, 0, producer.TrackSelect{
+		t.player = webm.NewMFileProducer(vidFile, 0, producer.TrackSelect{
 			Audio: true,
 			Video: true,
 		})
 	} else if fileType == "ivf" {
-		t.player = producer.NewIVFProducer(vidFile, 0)
+		t.player = ivf.NewIVFProducer(vidFile, 0)
 	} else if fileType == "gst" {
-		t.player = producer.NewGSTProducer(vidFile)
+		t.player = gst.NewGSTProducer(vidFile)
 	}
 	t.client.VideoTrack = t.player.VideoTrack()
 	t.client.AudioTrack = t.player.AudioTrack()

@@ -4,6 +4,6 @@ go 1.13
 
 require (
 	github.com/pion/ion v0.3.2
-	github.com/pion/ion-load-tool v0.0.0-20200515164406-af266aaf4440
+	github.com/pion/ion-load-tool v0.0.1
 	github.com/pion/webrtc/v2 v2.2.9
 )
