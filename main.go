@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/pion/ion-load-tool/ion"
-	"github.com/pion/ion-load-tool/producer"
-	"github.com/pion/ion-load-tool/producer/gst"
-	"github.com/pion/ion-load-tool/producer/ivf"
-	"github.com/pion/ion-load-tool/producer/webm"
+	"github.com/pion/producer"
+	"github.com/pion/producer/gst"
+	"github.com/pion/producer/ivf"
+	"github.com/pion/producer/webm"
 	"github.com/pion/webrtc/v2"
 	"github.com/pion/webrtc/v2/pkg/media"
 )
