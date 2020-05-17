@@ -3,80 +3,31 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
-	"math/rand"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
-	"github.com/cloudwebrtc/go-protoo/client"
-	"github.com/cloudwebrtc/go-protoo/logger"
-	"github.com/cloudwebrtc/go-protoo/peer"
-	"github.com/cloudwebrtc/go-protoo/transport"
-	"github.com/frankenbeanies/uuid4"
-	"github.com/pion/rtwatch/gst"
+	"github.com/pion/ion-load-tool/ion"
+	"github.com/pion/ion-load-tool/producer"
 	"github.com/pion/webrtc/v2"
 	"github.com/pion/webrtc/v2/pkg/media"
 )
 
 type watchSrv struct {
-	peerCon    *webrtc.PeerConnection
-	room       RoomInfo
-	name       string
-	audioTrack *webrtc.Track
-	videoTrack *webrtc.Track
-	pipeline   *gst.Pipeline
-	paused     bool
+	doneCh chan interface{}
+	client ion.RoomClient
+	name   string
+	paused bool
+	player producer.IFilePlayer
 }
 
-func (t *watchSrv) handleWebSocketOpen(transport *transport.WebSocketTransport) {
-	logger.Infof("handleWebSocketOpen")
-
-	pr := peer.NewPeer(t.room.Uid, transport)
-	pr.On("close", func(code int, err string) {
-		logger.Infof("peer close [%d] %s", code, err)
-	})
-
-	handleRequest := func(request peer.Request, accept peer.AcceptFunc, reject peer.RejectFunc) {
-		method := request.Method
-		logger.Infof("handleRequest =>  (%s) ", method)
-		if method == "kick" {
-			reject(486, "Busy Here")
-		} else {
-			accept(nil)
-		}
-	}
-
-	handleClose := func(code int, err string) {
-		logger.Infof("handleClose => peer (%s) [%d] %s", pr.ID(), code, err)
-	}
-
-	pr.On("request", handleRequest)
-	pr.On("notification", t.handleMessage)
-	pr.On("close", handleClose)
-
-	joinMsg := JoinMsg{RoomInfo: t.room, Info: UserInfo{Name: t.name}}
-
-	pr.Request("join", joinMsg,
-		func(result json.RawMessage) {
-			logger.Infof("login success: =>  %s", result)
-			// Add media stream
-			t.publish(pr)
-		},
-		func(code int, err string) {
-			logger.Infof("login reject: %d => %s", code, err)
-		})
-}
-
-func (t *watchSrv) handleMessage(notification peer.Notification) {
-	logger.Infof("handleNotification => %s", notification.Method)
-	method := notification.Method
-	if method != "broadcast" {
-		return
-	}
+func (t *watchSrv) handleMessage(data json.RawMessage) {
 	var msg ChatMsg
-	err := json.Unmarshal(notification.Data, &msg)
+	err := json.Unmarshal(data, &msg)
 	if err != nil {
 		panic(err)
 	}
@@ -102,7 +53,7 @@ func (t *watchSrv) setPaused(paused bool) {
 	}
 	t.paused = paused
 	if t.paused {
-		go t.trackPausedLoop(t.audioTrack)
+		go t.trackPausedLoop(t.player.AudioTrack())
 	}
 }
 
@@ -119,11 +70,13 @@ func (t *watchSrv) trackPausedLoop(track *webrtc.Track) {
 func (t *watchSrv) handleCommand(cmd string) {
 	log.Println("Got command", cmd)
 	if contains([]string{"play", "start"}, cmd) {
-		t.pipeline.Play()
+		t.player.Pause(false)
 		t.setPaused(false)
+
 	} else if contains([]string{"pause", "stop"}, cmd) {
-		t.pipeline.Pause()
+		t.player.Pause(true)
 		t.setPaused(true)
+
 	} else if contains([]string{"seek"}, cmd) {
 		list := strings.Split(cmd, " ")
 		log.Println(list)
@@ -135,117 +88,94 @@ func (t *watchSrv) handleCommand(cmd string) {
 			log.Println("Error parsing seek string")
 			return
 		}
-		t.pipeline.SeekToTime(time)
+		t.player.SeekP(int(time))
 	}
 }
 
-func (t *watchSrv) publish(peer *peer.Peer) {
-	// Get code from rtwatch and gstreamer
-	if _, err := t.peerCon.AddTrack(t.audioTrack); err != nil {
-		log.Print(err)
-		panic(err)
+func (t *watchSrv) runClient() {
+	t.client.Init()
+	t.client.Join()
+
+	// Start producer
+	t.client.Publish(t.player.VideoCodec())
+
+	done := false
+	for !done {
+		select {
+		case <-t.client.OnStreamAdd:
+		case <-t.client.OnStreamRemove:
+		case msg := <-t.client.OnBroadcast:
+			t.handleMessage(msg)
+		case <-t.doneCh:
+			done = true
+			continue
+		}
 	}
-	if _, err := t.peerCon.AddTrack(t.videoTrack); err != nil {
-		log.Print(err)
-		panic(err)
-	}
 
-	t.peerCon.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		fmt.Printf("Connection State has changed %s \n", connectionState.String())
-	})
+	// Close producer and sender
+	t.player.Stop()
+	t.client.UnPublish()
 
-	// Create an offer to send to the browser
-	offer, err := t.peerCon.CreateOffer(nil)
-	if err != nil {
-		panic(err)
-	}
+	// Close client
+	t.client.Leave()
+	t.client.Close()
+}
 
-	// Sets the LocalDescription, and starts our UDP listeners
-	err = t.peerCon.SetLocalDescription(offer)
-	if err != nil {
-		panic(err)
-	}
-	log.Println(offer)
+func (t *watchSrv) setupClient(room, path, clientName, vidFile, fileType string) {
+	t.client = ion.NewClient(clientName, room, path)
+	t.doneCh = make(chan interface{})
 
-	pubMsg := PublishMsg{RoomInfo: t.room, Jsep: offer, Options: newPublishOptions()}
-
-	peer.Request("publish", pubMsg, t.finalizeConnect,
-		func(code int, err string) {
-			logger.Infof("publish reject: %d => %s", code, err)
+	// Configure sender tracks
+	if fileType == "webm" {
+		t.player = producer.NewMFileProducer(vidFile, 0, producer.TrackSelect{
+			Audio: true,
+			Video: true,
 		})
-}
-
-type connectMsg struct {
-	Ans webrtc.SessionDescription `json:"jsep"`
-}
-
-func (t *watchSrv) finalizeConnect(result json.RawMessage) {
-	logger.Infof("publish success: =>  %s", result)
-
-	var msg connectMsg
-	err := json.Unmarshal(result, &msg)
-	if err != nil {
-		log.Println(err)
-		return
+	} else if fileType == "ivf" {
+		t.player = producer.NewIVFProducer(vidFile, 0)
+	} else if fileType == "gst" {
+		t.player = producer.NewGSTProducer(vidFile)
 	}
+	t.client.VideoTrack = t.player.VideoTrack()
+	t.client.AudioTrack = t.player.AudioTrack()
 
-	// Set the remote SessionDescription
-	err = t.peerCon.SetRemoteDescription(msg.Ans)
-	if err != nil {
-		panic(err)
-	}
+	t.player.Start()
 }
 
 func main() {
 	var containerPath string
 	var ionPath string
-	var roomName string
+	var roomName, clientName string
 
-	flag.StringVar(&containerPath, "container-path", "", "path to the media file you want to playback")
+	flag.StringVar(&containerPath, "file", "", "path to the media file you want to playback")
 	flag.StringVar(&ionPath, "ion-url", "ws://localhost:8443/ws", "websocket url for ion biz system")
 	flag.StringVar(&roomName, "room", "video-demo", "Room name for Ion")
+	flag.StringVar(&clientName, "name", "video-user", "Client name for Ion")
 	flag.Parse()
 
 	if containerPath == "" {
-		panic("-container-path must be specified")
+		panic("-file must be specified")
 	}
 
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{
-		ICEServers: []webrtc.ICEServer{
-			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
-			},
-		},
-	})
-	if err != nil {
-		log.Fatal(err)
+	watchS := watchSrv{name: "Video User"}
+
+	containerType, ok := producer.ValidateVPFile(containerPath)
+	if !ok {
+		containerType = "gst"
+		log.Println("Direct playback not support. Using gstreamer")
 	}
 
-	videoTrack, err := pc.NewTrack(webrtc.DefaultPayloadTypeH264, rand.Uint32(), "synced-video", "synced-video")
-	if err != nil {
-		log.Fatal(err)
-	}
+	// Setup shutdown
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	audioTrack, err := pc.NewTrack(webrtc.DefaultPayloadTypeOpus, rand.Uint32(), "synced-audio", "synced-video")
-	if err != nil {
-		log.Fatal(err)
-	}
+	go func() {
+		<-sigs
+		close(watchS.doneCh)
+	}()
 
-	pipeline := gst.CreatePipeline(containerPath, audioTrack, videoTrack)
-	pipeline.Start()
+	watchS.setupClient(roomName, ionPath, clientName, containerPath, containerType)
+	watchS.runClient()
 
-	uuidStr := uuid4.New().String()
-	peerId := "video-client-" + uuidStr
-
-	watchS := watchSrv{
-		peerCon:    pc,
-		room:       RoomInfo{Rid: roomName, Uid: peerId},
-		name:       "Video User",
-		videoTrack: videoTrack,
-		audioTrack: audioTrack,
-		pipeline:   pipeline,
-	}
-
-	var wsClient = client.NewClient(ionPath+"?peer="+peerId, watchS.handleWebSocketOpen)
-	wsClient.ReadMessage()
+	log.Println("Clean shutdown")
 }
